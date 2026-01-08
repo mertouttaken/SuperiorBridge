@@ -1,0 +1,8 @@
+name: SSBProxyBridge
+version: 1.0.0
+main: com.bgsoftware.ssbbridge.plugin.SSBProxyBridgePlugin
+api-version: 1.16
+description: Multi-Proxy and Multi-Server synchronization bridge for SuperiorSkyblock2.
+author: Mert
+depend:
+  - SuperiorSkyblock2

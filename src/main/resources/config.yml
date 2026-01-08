@@ -1,0 +1,8 @@
+server-id: "skyblock-1"
+redis:
+  host: "127.0.0.1"
+  port: 6379
+  password: "test123"
+manager:
+  channel: "ssb-manager"
+heartbeat-interval: 5
