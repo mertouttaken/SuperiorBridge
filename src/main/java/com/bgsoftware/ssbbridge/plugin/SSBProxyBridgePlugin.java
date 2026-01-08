@@ -4,15 +4,14 @@ import com.bgsoftware.ssbbridge.common.messaging.MessageBroker;
 import com.bgsoftware.ssbbridge.common.messaging.redis.RedisBroker;
 import com.bgsoftware.ssbbridge.plugin.bridge.NetworkDatabaseBridge;
 import com.bgsoftware.ssbbridge.plugin.config.BridgeConfig;
+import com.bgsoftware.ssbbridge.plugin.listeners.IslandCreationListener;
+import com.bgsoftware.ssbbridge.plugin.listeners.TeamAwareListener;
 import com.bgsoftware.ssbbridge.plugin.service.ProxyService;
 import com.bgsoftware.ssbbridge.plugin.tasks.HeartbeatTask;
-import com.bgsoftware.superiorskyblock.api.SuperiorSkyblock;
-import com.bgsoftware.superiorskyblock.api.SuperiorSkyblockAPI;
 import org.bukkit.Bukkit;
-import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
+import redis.clients.jedis.JedisPool;
 
-import java.lang.reflect.Field;
 
 public class SSBProxyBridgePlugin extends JavaPlugin {
 
@@ -25,6 +24,7 @@ public class SSBProxyBridgePlugin extends JavaPlugin {
     public void onEnable() {
         // 1. Config Yükle
         this.config = new BridgeConfig(this);
+
 
         // 2. Redis Bağlantısı
         this.messageBroker = new RedisBroker(config.redisHost, config.redisPort, config.redisPassword);
@@ -47,6 +47,9 @@ public class SSBProxyBridgePlugin extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
+
+        getServer().getPluginManager().registerEvents(new IslandCreationListener(this, messageBroker, config), this);
+        getServer().getPluginManager().registerEvents(new TeamAwareListener(this, config), this);
 
         // 5. Heartbeat Başlat
         Bukkit.getScheduler().runTaskTimerAsynchronously(this,
@@ -151,5 +154,11 @@ public class SSBProxyBridgePlugin extends JavaPlugin {
 
     public ProxyService getProxyService() {
         return proxyService;
+    }
+    public JedisPool getJedisPool() {
+        if (messageBroker instanceof RedisBroker) {
+            return ((RedisBroker) messageBroker).getJedisPool();
+        }
+        return null;
     }
 }

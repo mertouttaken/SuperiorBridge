@@ -32,7 +32,7 @@ public class SSBManagerApp {
         broker.connect();
 
         // 5. Packet Handler'ı Kur ve Dinlemeye Başla
-        ManagerPacketHandler packetHandler = new ManagerPacketHandler(manager, broker);
+        ManagerPacketHandler packetHandler = new ManagerPacketHandler(manager, broker, db);
 
         // Kanal ismine dikkat: ssb-manager (Az önce monitor'de gördüğümüz isim)
         broker.subscribe("ssb-manager", packetHandler::handlePacket);

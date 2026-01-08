@@ -103,4 +103,50 @@ public class DatabaseHandler {
         }
         return results;
     }
+    // Bu iki metodu DatabaseHandler.java içine ekle
+    public void saveIslandSchematic(String islandUuid, byte[] data) {
+        String sql = "INSERT INTO island_schematics (uuid, data) VALUES (?, ?) " +
+                "ON DUPLICATE KEY UPDATE data = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, islandUuid);
+            ps.setBytes(2, data);
+            ps.setBytes(3, data);
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public byte[] loadIslandSchematic(String playerUuid) {
+        // Oyuncunun adasını bul ve o adanın şematiğini getir
+        String sql = "SELECT s.data FROM island_schematics s " +
+                "JOIN ssb_players p ON s.uuid = p.island_uuid WHERE p.uuid = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, playerUuid);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) return rs.getBytes("data");
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    public byte[] getIslandSchematic(String playerUuid) {
+        // Önce oyuncunun adasını bul, sonra o adanın şematiğini getir
+        String sql = "SELECT s.schematic FROM island_schematics s " +
+                "JOIN players p ON s.uuid = p.island WHERE p.uuid = ?";
+        try (Connection conn = dataSource.getConnection();
+             PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, playerUuid);
+            ResultSet rs = ps.executeQuery();
+            if (rs.next()) {
+                return rs.getBytes("schematic");
+            }
+        } catch (SQLException e) {
+            e.printStackTrace();
+        }
+        return null;
+    }
 }

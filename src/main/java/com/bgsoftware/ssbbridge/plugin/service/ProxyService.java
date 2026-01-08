@@ -17,13 +17,11 @@ public class ProxyService {
     /**
      * Oyuncuyu belirtilen sunucuya gönderir.
      */
+// ProxyService.java
     public void sendPlayerToServer(Player player, String targetServer) {
-        if (targetServer == null || targetServer.isEmpty()) return;
-
         ByteArrayDataOutput out = ByteStreams.newDataOutput();
         out.writeUTF("Connect");
         out.writeUTF(targetServer);
-
         player.sendPluginMessage(plugin, "BungeeCord", out.toByteArray());
     }
 }

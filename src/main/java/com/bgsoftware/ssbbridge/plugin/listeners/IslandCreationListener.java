@@ -2,27 +2,29 @@ package com.bgsoftware.ssbbridge.plugin.listeners;
 
 import com.bgsoftware.ssbbridge.common.messaging.MessageBroker;
 import com.bgsoftware.ssbbridge.common.messaging.Packet;
-import com.bgsoftware.ssbbridge.common.messaging.packets.IslandCreationRequestPacket;
-import com.bgsoftware.ssbbridge.common.messaging.packets.PrepareIslandCreationPacket;
-import com.bgsoftware.ssbbridge.common.messaging.packets.ResponsePacket;
+import com.bgsoftware.ssbbridge.common.messaging.packets.*;
 import com.bgsoftware.ssbbridge.plugin.SSBProxyBridgePlugin;
 import com.bgsoftware.ssbbridge.plugin.config.BridgeConfig;
 import com.bgsoftware.superiorskyblock.api.SuperiorSkyblockAPI;
 import com.bgsoftware.superiorskyblock.api.events.PreIslandCreateEvent;
+import com.bgsoftware.superiorskyblock.api.island.Island;
+import com.bgsoftware.superiorskyblock.api.schematic.Schematic;
+import com.bgsoftware.superiorskyblock.api.schematic.SchematicOptions;
+import com.bgsoftware.superiorskyblock.api.world.Dimension;
 import com.bgsoftware.superiorskyblock.api.wrappers.SuperiorPlayer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Location;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerCommandPreprocessEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 
-import java.math.BigDecimal;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.UUID;
+import java.io.File;
+import java.io.IOException;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class IslandCreationListener implements Listener {
@@ -38,7 +40,26 @@ public class IslandCreationListener implements Listener {
         this.plugin = plugin;
         this.broker = broker;
         this.config = config;
-        broker.subscribe("ssb-server-" + config.serverId, this::handleIncomingCreationOrder);
+        broker.subscribe("ssb-server-" + config.serverId, this::onPrivatePacketReceived);
+    }
+
+    private void onPrivatePacketReceived(Packet packet) {
+        if (packet instanceof PrepareIslandCreationPacket) {
+            handleIncomingCreationOrder((PrepareIslandCreationPacket) packet);
+        } else if (packet instanceof IslandInvitePacket) {
+            handleIncomingInvite((IslandInvitePacket) packet);
+        }
+    }
+
+    private void handleIncomingInvite(IslandInvitePacket invite) {
+        Player target = Bukkit.getPlayer(invite.getTargetPlayerName());
+        if (target != null && target.isOnline()) {
+            target.sendMessage("");
+            target.sendMessage(ChatColor.GREEN + "★ " + ChatColor.AQUA + invite.getInviterName() +
+                    ChatColor.WHITE + " seni adasına davet etti!");
+            target.sendMessage(ChatColor.YELLOW + "Katılmak için: " + ChatColor.WHITE + "/is accept " + invite.getInviterName());
+            target.sendMessage("");
+        }
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
@@ -54,10 +75,6 @@ public class IslandCreationListener implements Listener {
         event.setCancelled(true);
         player.sendMessage(ChatColor.YELLOW + "En uygun sunucu aranıyor, lütfen bekleyin...");
 
-        // DÜZELTME: PreIslandCreateEvent'te schematic metodu yok.
-        // Genellikle oyuncunun bekleyen bir isteği (request) olur.
-        // Schematic bilgisi cross-server taşınacağı için boş bırakabilir veya
-        // varsayılan schematic'i alabilirsin.
         String schematic = "";
 
         Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
@@ -72,12 +89,21 @@ public class IslandCreationListener implements Listener {
                 Packet responseRaw = broker.sendRequest(request, config.managerChannel, 3000).join();
 
                 if (responseRaw instanceof ResponsePacket) {
-                    ResponsePacket response = (ResponsePacket) responseRaw;
-                    String targetServer = response.getPayloadJson();
+                    String targetServer = ((ResponsePacket) responseRaw).getPayloadJson();
 
-                    Bukkit.getScheduler().runTask(plugin, () -> processManagerDecision(player, targetServer, schematic));
+                    // Karar mekanizması buraya taşındı
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (targetServer.equals(config.serverId)) {
+                            permittedCreates.add(player.getUniqueId());
+                            player.chat("/is create" + (schematic.isEmpty() ? "" : " " + schematic));
+                        } else {
+                            player.sendMessage(ChatColor.GREEN + "Ada oluşturmak için yönlendiriliyorsunuz...");
+                            PrepareIslandCreationPacket packet = new PrepareIslandCreationPacket(config.serverId, player.getUniqueId().toString(), schematic, null);
+                            broker.sendPacket(packet, "ssb-server-" + targetServer);
+                            plugin.getProxyService().sendPlayerToServer(player, targetServer);
+                        }
+                    });
                 }
-
             } catch (Exception e) {
                 player.sendMessage(ChatColor.RED + "Sunucu ağına bağlanılamadı.");
                 e.printStackTrace();
@@ -85,50 +111,97 @@ public class IslandCreationListener implements Listener {
         });
     }
 
-    private void processManagerDecision(Player player, String targetServer, String schematic) {
-        if (targetServer.equals(config.serverId)) {
-            permittedCreates.add(player.getUniqueId());
-            // DÜZELTME: API yerine komut tetiklemek daha güvenli ve eventleri doğru fırlatır.
-            player.chat("/is create" + (schematic.isEmpty() ? "" : " " + schematic));
-        } else {
-            player.sendMessage(ChatColor.GREEN + "Ada oluşturmak için yönlendiriliyorsunuz...");
-            PrepareIslandCreationPacket packet = new PrepareIslandCreationPacket(config.serverId, player.getUniqueId().toString(), schematic);
-            broker.sendPacket(packet, "ssb-server-" + targetServer);
-            plugin.getProxyService().sendPlayerToServer(player, targetServer);
+    @EventHandler
+    public void onLobbyCommand(PlayerCommandPreprocessEvent event) {
+        String msg = event.getMessage().toLowerCase();
+
+        if (msg.startsWith("/is go")) {
+            event.setCancelled(true);
+            Player player = event.getPlayer();
+            player.sendMessage(ChatColor.YELLOW + "Adanız hazırlanıyor, sunucu tahsis ediliyor...");
+
+            DataRequestPacket request = new DataRequestPacket(
+                    "lobby",
+                    "LOAD_ISLAND_AND_TELEPORT",
+                    player.getUniqueId().toString()
+            );
+
+            broker.sendRequest(request, "ssb-manager", 8000).thenAccept(responseRaw -> {
+                if (responseRaw instanceof ResponsePacket) {
+                    String targetServer = ((ResponsePacket) responseRaw).getPayloadJson();
+
+                    // Karar mekanizması buraya taşındı
+                    Bukkit.getScheduler().runTask(plugin, () -> {
+                        if (targetServer.equals(config.serverId)) {
+                            // Eğer zaten bu sunucudaysa direkt komutu işlet
+                            player.chat("/is go");
+                        } else {
+                            player.sendMessage(ChatColor.GREEN + "Adanıza yönlendiriliyorsunuz...");
+                            plugin.getProxyService().sendPlayerToServer(player, targetServer);
+                        }
+                    });
+                }
+            });
         }
     }
 
-    private void handleIncomingCreationOrder(Packet packet) {
-        if (packet instanceof PrepareIslandCreationPacket) {
-            PrepareIslandCreationPacket order = (PrepareIslandCreationPacket) packet;
-            pendingIncomingCreations.put(UUID.fromString(order.getPlayerUuid()), order.getSchematicName());
+    private void handleIncomingCreationOrder(PrepareIslandCreationPacket order) {
+        if (order.getSchematicData() != null) {
+            File tempFile = new File(plugin.getDataFolder(), "imports/" + order.getPlayerUuid() + ".schem");
+            try {
+                java.nio.file.Files.write(tempFile.toPath(), order.getSchematicData());
+                pendingIncomingCreations.put(UUID.fromString(order.getPlayerUuid()), tempFile.getAbsolutePath());
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    // --- Şematik İşlemleri ---
+
+    public void saveAreaAsSchematic(Location loc1, Location loc2, String schemName) {
+        SchematicOptions options = SchematicOptions.newBuilder(schemName).build();
+        SuperiorSkyblockAPI.getSchematics().saveSchematic(loc1, loc2, options, () -> {
+            System.out.println("Şematik başarıyla kaydedildi: " + schemName);
+        });
+    }
+
+    public void pasteMySchematic(String schemName, Location targetLoc) {
+        Schematic schematic = SuperiorSkyblockAPI.getSchematics().getSchematic(schemName);
+        Island island = SuperiorSkyblockAPI.getIslandAt(targetLoc);
+
+        if (schematic != null && island != null) {
+            schematic.pasteSchematic(island, targetLoc, () -> {
+                System.out.println(schemName + " adaya başarıyla yapıştırıldı.");
+            });
+        } else {
+            if (schematic == null) System.out.println("Hata: " + schemName + " şematiği bulunamadı!");
+            if (island == null) System.out.println("Hata: Lokasyonda ada bulunamadı!");
+        }
+    }
+
+    public void printAllSchematics() {
+        List<String> allSchems = SuperiorSkyblockAPI.getSchematics().getSchematics();
+        for (String name : allSchems) {
+            System.out.println("Yüklü Şematik: " + name);
         }
     }
 
     @EventHandler
     public void onPlayerJoin(PlayerJoinEvent event) {
-        UUID uuid = event.getPlayer().getUniqueId();
+        Player player = event.getPlayer();
+        Island island = SuperiorSkyblockAPI.getPlayer(player.getUniqueId()).getIsland();
 
-        if (pendingIncomingCreations.containsKey(uuid)) {
-            String schematic = pendingIncomingCreations.remove(uuid);
+        if (island == null) return;
 
-            Bukkit.getScheduler().runTaskLater(plugin, () -> {
-                permittedCreates.add(uuid);
-                SuperiorPlayer sPlayer = SuperiorSkyblockAPI.getPlayer(uuid);
+        String schemName = "baslangic_sematigi";
+        Schematic schematic = SuperiorSkyblockAPI.getSchematics().getSchematic(schemName);
 
-                // DÜZELTME: createIsland metodu GridManager'da şu parametreleri ister:
-                // (SuperiorPlayer, schematicName, BigDecimal bonus, Biome, islandName)
-                // En basit haliyle:
-                SuperiorSkyblockAPI.getGrid().createIsland(
-                        sPlayer,
-                        (schematic == null || schematic.isEmpty()) ? "normal" : schematic,
-                        BigDecimal.ZERO,
-                        null,
-                        ""
-                );
-
-                event.getPlayer().sendMessage(ChatColor.GREEN + "Adanız oluşturuldu!");
-            }, 10L);
+        if (schematic != null) {
+            Location center = island.getCenter(Dimension.getByName("normal")).getBlock().getLocation();
+            schematic.pasteSchematic(island, center, () -> {
+                player.sendMessage("§aAdan başarıyla yüklendi!");
+            });
         }
     }
 }

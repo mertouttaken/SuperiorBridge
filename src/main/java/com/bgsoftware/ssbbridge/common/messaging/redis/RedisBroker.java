@@ -158,4 +158,8 @@ public class RedisBroker implements MessageBroker {
             System.err.println("[RedisBroker] Mesaj işleme hatası: " + e.getMessage());
         }
     }
+    // RedisBroker.java içine eklenecek metot
+    public JedisPool getJedisPool() {
+        return this.jedisPool;
+    }
 }
